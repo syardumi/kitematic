@@ -9,7 +9,23 @@ import metrics from '../utils/MetricsUtil';
 import containerActions from '../actions/ContainerActions';
 
 var ContainerSettingsVolumes = React.createClass({
-  handleChooseVolumeClick: function (dockerVol) {
+
+  getInitialState: function () {
+    // Build an Array from the container 'Volumes' attribute
+    let mounts = this.props.container.Mounts;
+    mounts.push({
+      Source: '',
+      Destination: '',
+      Driver: 'none'
+    });
+
+    return {
+      mounts: mounts
+    }
+  },
+
+  handleChooseVolumeClick: function (index) {
+    var _this = this;
     dialog.showOpenDialog({properties: ['openDirectory', 'createDirectory']}, (filenames) => {
       if (!filenames) {
         return;
@@ -28,43 +44,46 @@ var ContainerSettingsVolumes = React.createClass({
 
       metrics.track('Choose Directory for Volume');
 
-      var mounts = _.clone(this.props.container.Mounts);
-      _.each(mounts, m => {
-        if (m.Destination === dockerVol) {
+      var mounts = _.clone(_this.state.mounts);
+      _.each(mounts, function (m, k) {
+        if (k === index) {
           m.Source = util.windowsToLinuxPath(directory);
           m.Driver = null;
         }
       });
-
-      var binds = mounts.map(m => {
-        return m.Source + ':' + m.Destination;
-      });
-
-      let hostConfig = _.extend(this.props.container.HostConfig, {Binds: binds});
-
-      containerActions.update(this.props.container.Name, {Mounts: mounts, HostConfig: hostConfig});
+      
+      _this.writeToPropsContainer(mounts);
     });
   },
-  handleRemoveVolumeClick: function (dockerVol) {
+  handleAddVolumeClick: function () {
+    metrics.track('Added Volume Directory', {
+      from: 'settings'
+    });
+    
+    var mounts = _.clone(this.state.mounts);
+    mounts.push({
+      Source: '',
+      Destination: '',
+      Driver: 'none'
+    });
+    this.setState({
+      mounts: mounts
+    });
+    
+    this.writeToPropsContainer(mounts);
+  },
+  handleRemoveVolumeClick: function (index) {
     metrics.track('Removed Volume Directory', {
       from: 'settings'
     });
 
-    var mounts = _.clone(this.props.container.Mounts);
-    _.each(mounts, m => {
-      if (m.Destination === dockerVol) {
-        m.Source = null;
-        m.Driver = 'local';
-      }
+    var mounts = _.clone(this.state.mounts);
+    mounts.splice(index, 1);
+    this.setState({
+      mounts: mounts
     });
-
-    let binds = mounts.map(m => {
-      return m.Source + ':' + m.Destination;
-    });
-
-    let hostConfig = _.extend(this.props.container.HostConfig, {Binds: binds});
-
-    containerActions.update(this.props.container.Name, {Mounts: mounts, HostConfig: hostConfig});
+    
+    this.writeToPropsContainer(mounts);
   },
   handleOpenVolumeClick: function (path) {
     metrics.track('Opened Volume Directory', {
@@ -76,13 +95,36 @@ var ContainerSettingsVolumes = React.createClass({
       shell.showItemInFolder(path);
     }
   },
+  handleSaveVolumesClick: function () {
+    metrics.track('Saved Volumes');
+    var mounts = [];
+
+    this.writeToPropsContainer(mounts);
+  },
+  writeToPropsContainer: function(mounts, saveToHostConfig = false){
+    // write to the docker's host config
+    let binds = mounts.map(m => {
+      return m.Source + ':' + m.Destination;
+    });
+
+    let hostConfig = _.extend(this.props.container.HostConfig, {Binds: binds});
+    
+    //update the container
+    if (saveToHostConfig) {
+      metrics.track('Write Host Config');
+      containerActions.update(this.props.container.Name, {Mounts: mounts, HostConfig: hostConfig});
+    } else {
+      containerActions.update(this.props.container.Name, {Mounts: mounts});
+    }
+  },
   render: function () {
-    if (!this.props.container) {
+    var _this = this;
+    if (!this.state.mounts) {
       return false;
     }
 
     var homeDir = util.isWindows() ? util.windowsToLinuxPath(util.home()) : util.home();
-    var mounts= _.map(this.props.container.Mounts, (m, i) => {
+    var mounts= _.map(_this.state.mounts, (m, i) => {
       let source = m.Source, destination = m.Destination;
       if (!m.Source || m.Source.indexOf(homeDir) === -1) {
         source = (
@@ -94,13 +136,21 @@ var ContainerSettingsVolumes = React.createClass({
           <a className="value-right" onClick={this.handleOpenVolumeClick.bind(this, source)}>{local.replace(process.env.HOME, '~')}</a>
         );
       }
+      
+      let action;
+      if (i === _this.state.mounts.length - 1) {
+        action = <a className="only-icon btn btn-positive small" disabled={this.props.container.State.Updating} onClick={this.handleAddVolumeClick.bind(this, i)}><span className="icon icon-add"></span></a>;
+      } else {
+        action = <a className="only-icon btn btn-action small" disabled={this.props.container.State.Updating} onClick={this.handleRemoveVolumeClick.bind(this, i)}><span className="icon icon-delete"></span></a>;
+      }
+      
       return (
         <tr>
-          <td>{destination}</td>
+          <td><input type="text" className="key line" >{destination}</input></td>
           <td>{source}</td>
           <td>
-            <a className="btn btn-action small" disabled={this.props.container.State.Updating} onClick={this.handleChooseVolumeClick.bind(this, destination)}>Change</a>
-            <a className="btn btn-action small" disabled={this.props.container.State.Updating} onClick={this.handleRemoveVolumeClick.bind(this, destination)}>Remove</a>
+            <a className="btn btn-action small" disabled={this.props.container.State.Updating} onClick={this.handleChooseVolumeClick.bind(this, i)}>Change</a>
+            {action}
           </td>
         </tr>
       );
@@ -121,6 +171,7 @@ var ContainerSettingsVolumes = React.createClass({
               {mounts}
             </tbody>
           </table>
+          <a className="btn btn-action" disabled={this.props.container.State.Updating} onClick={this.handleSaveVolumesClick}>Save</a>
         </div>
       </div>
     );
