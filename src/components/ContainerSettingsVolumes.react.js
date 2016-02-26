@@ -20,7 +20,8 @@ var ContainerSettingsVolumes = React.createClass({
     });
 
     return {
-      mounts: mounts
+      mounts: mounts,
+      hasChanged: false
     }
   },
 
@@ -52,24 +53,58 @@ var ContainerSettingsVolumes = React.createClass({
         }
       });
       
+      //refresh, don't write out
       _this.writeToPropsContainer(mounts);
     });
+  },
+  handleChangeDockerFolderClick: function(index, event) {
+    metrics.track('Changed Docker Directory', {
+      from: 'settings'
+    });
+    
+    //set the destination on the volume
+    var mounts = _.clone(this.state.mounts);
+	_.each(mounts, function (m, k) {
+	  if (k === index) {
+	    m.Destination = event.target.value;
+	  }
+	});
+      
+    //refresh, don't write out
+    this.writeToPropsContainer(mounts);
   },
   handleAddVolumeClick: function () {
     metrics.track('Added Volume Directory', {
       from: 'settings'
     });
     
+    //add a blank volume slot
     var mounts = _.clone(this.state.mounts);
     mounts.push({
       Source: '',
       Destination: '',
       Driver: 'none'
     });
-    this.setState({
-      mounts: mounts
+    
+    //refresh, don't write out
+    this.writeToPropsContainer(mounts);
+  },
+  handleClearVolumeClick: function (index) {
+    metrics.track('Clear Volume Values', {
+      from: 'settings'
     });
     
+    //clear the index's text values
+    var mounts = _.clone(this.state.mounts);
+    _.each(mounts, function (m, k) {
+	  if (k === index) {
+	    m.Source = ''
+	    m.Destination = '';
+	    m.Driver = 'none';
+	  }
+	});
+	
+	//refresh, don't write out
     this.writeToPropsContainer(mounts);
   },
   handleRemoveVolumeClick: function (index) {
@@ -77,12 +112,11 @@ var ContainerSettingsVolumes = React.createClass({
       from: 'settings'
     });
 
+    //remove a volume from the array
     var mounts = _.clone(this.state.mounts);
     mounts.splice(index, 1);
-    this.setState({
-      mounts: mounts
-    });
     
+    //refresh, don't write out
     this.writeToPropsContainer(mounts);
   },
   handleOpenVolumeClick: function (path) {
@@ -97,23 +131,54 @@ var ContainerSettingsVolumes = React.createClass({
   },
   handleSaveVolumesClick: function () {
     metrics.track('Saved Volumes');
-    var mounts = [];
-
-    this.writeToPropsContainer(mounts);
-  },
-  writeToPropsContainer: function(mounts, saveToHostConfig = false){
-    // write to the docker's host config
-    let binds = mounts.map(m => {
-      return m.Source + ':' + m.Destination;
+    
+    var mounts = _.clone(this.state.mounts);
+    
+    //validate mounts here
+    let validatedMounts = [];
+    _.each(mounts, function (m, k) {
+      if (m.Source !== '' && m.Destination !== '') {
+        validatedMounts.push(m);
+      }
     });
 
-    let hostConfig = _.extend(this.props.container.HostConfig, {Binds: binds});
+    //refresh, don't write out
+    this.writeToPropsContainer(validatedMounts, true);
+  },
+  writeToPropsContainer: function(mounts, saveToHostConfig = false){
+    //set the state mounts for reuse
+    this.setState({
+      mounts: mounts,
+      hasChanged: true
+    });
     
     //update the container
-    if (saveToHostConfig) {
+    if (saveToHostConfig) { //*** write to docker's host config
       metrics.track('Write Host Config');
+      
+      this.setState({
+        mounts: mounts,
+        hasChanged: false
+      });
+      
+      //*** write to the docker's host config
+      let binds = mounts.map(m => {
+        return m.Source + ':' + m.Destination;
+      });
+
+      let hostConfig = _.extend(this.props.container.HostConfig, {Binds: binds});
+      
+      let refreshMounts = _.clone(mounts);
+      refreshMounts.push({
+        Source: '',
+        Destination: '',
+        Driver: 'none'
+      });
+      this.setState({
+        mounts: refreshMounts
+      });
       containerActions.update(this.props.container.Name, {Mounts: mounts, HostConfig: hostConfig});
-    } else {
+    } else { //don't write out, just an update/refresh to the container
       containerActions.update(this.props.container.Name, {Mounts: mounts});
     }
   },
@@ -144,17 +209,28 @@ var ContainerSettingsVolumes = React.createClass({
         action = <a className="only-icon btn btn-action small" disabled={this.props.container.State.Updating} onClick={this.handleRemoveVolumeClick.bind(this, i)}><span className="icon icon-delete"></span></a>;
       }
       
+      if (destination === '') {
+        destination = <input type="text" className="key line" onBlur={this.handleChangeDockerFolderClick.bind(this, i)}></input>;
+      }
+      
       return (
         <tr>
-          <td><input type="text" className="key line" >{destination}</input></td>
+          <td>{destination}</td>
           <td>{source}</td>
           <td>
-            <a className="btn btn-action small" disabled={this.props.container.State.Updating} onClick={this.handleChooseVolumeClick.bind(this, i)}>Change</a>
+            <a className="btn btn-action small" disabled={this.props.container.State.Updating} onClick={this.handleChooseVolumeClick.bind(this, i)}>Select Folder</a>
+            <a className="btn btn-action small" disabled={this.props.container.State.Updating} onClick={this.handleClearVolumeClick.bind(this, i)}>Clear</a>
             {action}
           </td>
         </tr>
       );
     });
+    
+    let deltaIcon = '';
+    if (this.state.hasChanged){
+      deltaIcon = <span className="delta"></span>;
+    }
+    
     return (
       <div className="settings-panel">
         <div className="settings-section">
@@ -171,7 +247,7 @@ var ContainerSettingsVolumes = React.createClass({
               {mounts}
             </tbody>
           </table>
-          <a className="btn btn-action" disabled={this.props.container.State.Updating} onClick={this.handleSaveVolumesClick}>Save</a>
+          <a className="btn btn-action" disabled={this.props.container.State.Updating} onClick={this.handleSaveVolumesClick}>Save{deltaIcon}</a>
         </div>
       </div>
     );
