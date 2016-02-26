@@ -63,15 +63,18 @@ var ContainerSettingsVolumes = React.createClass({
     });
     
     //set the destination on the volume
+    let didChange = false;
     var mounts = _.clone(this.state.mounts);
 	_.each(mounts, function (m, k) {
-	  if (k === index) {
+	  if (k === index && m.Destination !== event.target.value) {
+	    didChange = true;
 	    m.Destination = event.target.value;
 	  }
 	});
       
     //refresh, don't write out
-    this.writeToPropsContainer(mounts);
+    if (didChange)
+	    this.writeToPropsContainer(mounts);
   },
   handleAddVolumeClick: function () {
     metrics.track('Added Volume Directory', {
