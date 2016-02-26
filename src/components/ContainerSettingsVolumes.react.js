@@ -12,7 +12,7 @@ var ContainerSettingsVolumes = React.createClass({
 
   getInitialState: function () {
     // Build an Array from the container 'Volumes' attribute
-    let mounts = this.props.container.Mounts;
+    let mounts = _.clone(this.props.container.Mounts);
     mounts.push({
       Source: '',
       Destination: '',
